@@ -274,8 +274,6 @@ const state = {
   lastResult: null,
   studentRoster: [],
   rosterDraft: null,
-  smsStatus: '',
-  smsBackendUrl: '',
   questions: [],
   currentQ: 0,
   answers: [],
@@ -378,7 +376,7 @@ function renderSetup(){
       <select id="classInput">
         ${["6","7","8","9","10","11","12"].map(c=>`<option value="${c}" ${c===state.studentClass?'selected':''}>Class ${c}</option>`).join("")}
       </select>
-      <div class="hint" id="permHint">Choose your class. If a student roster is configured, only authorized students can continue. SMS will be sent to the mobile number provided by your teacher.</div>
+      <div class="hint" id="permHint">Choose your class. If a student roster is configured, only authorized students can continue.</div>
       <div class="row" style="margin-top:24px;">
         <button class="btn" id="btnContinue">Continue to Available Papers &rarr;</button>
         <button class="btn ghost" id="btnReviewAttempts">Review past attempts</button>
@@ -740,7 +738,6 @@ async function submitExam(){
     pct: Math.round((score/state.questions.length)*100),
     warnings: state.warnings,
     warnCount: state.warnings.length,
-    phone: rosterEntry ? rosterEntry.phone : '',
     submittedAt: new Date().toISOString(),
     breakdown
   };
@@ -752,10 +749,8 @@ async function submitExam(){
   }
 
   state.lastResult = result;
-  state.smsStatus = 'Sending SMS...';
   state.view = "done";
   render();
-  notifyBySmsAuto(result);
 }
 
 function renderDone(){
@@ -777,7 +772,6 @@ function renderDone(){
           <p style="margin:0;font-family:var(--mono);font-size:12px;color:var(--muted);">Paper</p>
           <strong>${escapeHtml(result.paperTitle)}</strong><br/>
           <span class="hint">${escapeHtml(result.paperSubject)} · Class ${escapeHtml(result.cls)}</span>
-          ${state.smsStatus ? `<div class="hint" style="margin-top:8px;">${escapeHtml(state.smsStatus)}</div>` : ''}
         </div>
       </div>
       <div style="margin:18px 0;padding:18px;border:1px solid var(--line);border-radius:2px;background:var(--paper);">
@@ -842,7 +836,6 @@ function renderTeacherLogin(){
       await loadTeacherPapers();
       await loadTeacherResults();
       await loadTeacherRoster();
-      await loadSmsSettings();
       render();
     } else {
       document.getElementById("loginErr").textContent = "Incorrect passcode. Try again.";
@@ -887,24 +880,6 @@ async function saveTeacherRoster(){
     await storage.set("teacher-roster", JSON.stringify(state.studentRoster));
   }catch(e){
     console.error("Couldn't save teacher roster:", e);
-  }
-}
-
-async function loadSmsSettings(){
-  try{
-    const saved = await storage.get("sms-settings");
-    const parsed = saved && saved.value ? JSON.parse(saved.value) : {};
-    state.smsBackendUrl = parsed.backendUrl || '';
-  }catch(e){
-    state.smsBackendUrl = '';
-  }
-}
-
-async function saveSmsSettings(){
-  try{
-    await storage.set("sms-settings", JSON.stringify({ backendUrl: state.smsBackendUrl }));
-  }catch(e){
-    console.error("Couldn't save SMS settings:", e);
   }
 }
 
@@ -961,30 +936,18 @@ function renderTeacherRosterTab(){
       <td>${i+1}</td>
       <td>${escapeHtml(s.name)}</td>
       <td>${escapeHtml(s.cls)}</td>
-      <td>${escapeHtml(s.phone)}</td>
       <td><button class="btn ghost delete-roster" data-index="${i}">Delete</button></td>
     </tr>
-  `).join("") : `<tr><td colspan="5" class="empty">No roster entries yet.</td></tr>`;
+  `).join("") : `<tr><td colspan="4" class="empty">No roster entries yet.</td></tr>`;
 
   return `
-    <div class="card" style="margin-bottom:18px;">
-      <h3 style="font-family:var(--serif);margin-top:0;">SMS backend</h3>
-      <p class="hint">URL of the deployed Flask backend (the one with <code>/api/send-sms</code>) that sends result SMS via Twilio. Leave blank to auto-detect from this page's own address &mdash; set this explicitly if gc.html is hosted separately from the backend, or opened as a preview here in Claude.</p>
-      <div class="row" style="align-items:flex-end;">
-        <div style="flex:1;min-width:220px;">
-          <label for="smsBackendInput">Backend URL</label>
-          <input type="text" id="smsBackendInput" value="${escapeHtml(state.smsBackendUrl)}" placeholder="https://your-app.onrender.com" />
-        </div>
-        <button class="btn" id="btnSaveSmsBackend">Save</button>
-      </div>
-    </div>
     <div style="margin-bottom:18px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;">
       <div class="hint">Manage the student roster permitted to access papers. Only students on this list can start or review tests.</div>
       <button class="btn" id="btnAddRoster">Add student</button>
     </div>
     ${state.rosterDraft ? renderRosterForm() : ''}
     <table>
-      <thead><tr><th>#</th><th>Name</th><th>Class</th><th>Mobile</th><th></th></tr></thead>
+      <thead><tr><th>#</th><th>Name</th><th>Class</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   `;
@@ -1053,11 +1016,6 @@ function renderRosterForm(){
         <div style="flex:1;min-width:160px;">
           <label for="rosterClass">Class</label>
           <select id="rosterClass">${["6","7","8","9","10","11","12"].map(c=>`<option value="${c}" ${c===draft.cls?'selected':''}>Class ${c}</option>`).join("")}</select>
-        </div>
-        <div style="flex:1;min-width:220px;">
-          <label for="rosterPhone">Mobile number</label>
-          <input type="text" id="rosterPhone" value="${escapeHtml(draft.phone)}" placeholder="+911234567890 or 1234567890" />
-          <div class="hint">10-digit numbers are automatically prefixed with +91. For non-Indian numbers, include the full country code with a leading +.</div>
         </div>
       </div>
       <div class="row" style="justify-content:flex-end;gap:12px;margin-top:12px;">
@@ -1309,20 +1267,8 @@ function syncTeacherDraftFromForm(){
 function syncRosterDraftFromForm(){
   const draft = state.rosterDraft;
   if(!draft) return;
-  const form = document.getElementById("teacherPaperForm") || document.body;
   draft.name = document.getElementById("rosterName").value.trim();
   draft.cls = document.getElementById("rosterClass").value;
-  draft.phone = normalizePhone(document.getElementById("rosterPhone").value.trim());
-}
-
-function normalizePhone(raw){
-  if(!raw) return raw;
-  let digits = raw.replace(/[^\d+]/g, '');
-  if(digits.startsWith('+')) return digits;
-  digits = digits.replace(/^0+/, '');
-  if(digits.length === 10) return `+91${digits}`;
-  if(digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
-  return `+${digits}`;
 }
 
 function validatePaperDraft(draft){
@@ -1447,15 +1393,8 @@ document.addEventListener("click",(e)=>{
     }
     return;
   }
-  if(e.target && e.target.id === "btnSaveSmsBackend"){
-    const val = document.getElementById("smsBackendInput").value.trim().replace(/\/+$/,'');
-    state.smsBackendUrl = val;
-    saveSmsSettings();
-    alert("SMS backend URL saved.");
-    return;
-  }
   if(e.target && e.target.id === "btnAddRoster"){
-    state.rosterDraft = { id: null, name: "", cls: "6", phone: "" };
+    state.rosterDraft = { id: null, name: "", cls: "6" };
     render();
     return;
   }
@@ -1469,7 +1408,6 @@ document.addEventListener("click",(e)=>{
     const draft = state.rosterDraft;
     if(!draft) return;
     if(!draft.name.trim()){ alert('Enter student name.'); return; }
-    if(!draft.phone.trim()){ alert('Enter mobile number.'); return; }
     if(draft.id){
       state.studentRoster = state.studentRoster.map((s)=> s.id === draft.id ? {...draft} : s);
     } else {
@@ -1742,7 +1680,6 @@ function downloadResultReport(result){
     `Score: ${result.score}/${result.total}`,
     `Percentage: ${result.pct}%`,
     `Proctoring flags: ${result.warnCount}`,
-    `Phone: ${result.phone}`,
     `Submitted: ${new Date(result.submittedAt).toLocaleString()}`,
     '',
     'Question breakdown:'
@@ -1755,54 +1692,6 @@ function downloadResultReport(result){
     if(b.expl) lines.push(`  Explanation: ${b.expl}`);
   });
   downloadFile(`result-${result.id}.txt`, lines.join('\n'), 'text/plain');
-}
-
-async function notifyBySmsAuto(result){
-  if(!result){
-    return;
-  }
-  if(!result.phone){
-    state.smsStatus = 'No teacher phone configured; SMS not sent.';
-    state.lastResult.smsStatus = state.smsStatus;
-    render();
-    return;
-  }
-
-  const normalizedPhone = normalizePhone(result.phone);
-
-  const apiOrigin = state.smsBackendUrl
-    ? state.smsBackendUrl
-    : (window.location.protocol === 'file:' || window.location.origin === 'null') ? 'http://localhost:8000' : window.location.origin;
-  const apiUrl = `${apiOrigin}/api/send-sms`;
-
-  try{
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        to: normalizedPhone,
-        body: `Hello ${result.name}, your ${result.paperTitle} score is ${result.score}/${result.total} (${result.pct}%). Review at Garg Classes.`
-      })
-    });
-
-    const text = await response.text();
-    let data = {};
-    try{ data = text ? JSON.parse(text) : {}; }catch(e){ data = { error: text }; }
-
-    if(!response.ok){
-      throw new Error(data.error || text || `HTTP ${response.status}`);
-    }
-
-    state.smsStatus = 'SMS request sent successfully.';
-    state.lastResult.smsStatus = 'SMS sent successfully.';
-    render();
-    console.log('SMS request sent successfully.', data);
-  }catch(err){
-    state.smsStatus = 'SMS send failed: ' + (err.message || err);
-    state.lastResult.smsStatus = state.smsStatus;
-    render();
-    console.warn('SMS send failed:', err);
-  }
 }
 
 function shuffle(arr){
