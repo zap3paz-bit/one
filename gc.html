@@ -294,6 +294,7 @@ const state = {
   studentReviewSelectedId: null,
   teacherSubView: "papers",
   teacherPaperDraft: null,
+  paperUploadMode: 'single',
   teacherEditingId: null,
   teacherDetailId: null,
   leaderboardFilter: { cls: "", paperId: "" }
@@ -1074,46 +1075,51 @@ function renderTeacherPaperForm(){
           <label for="paperChapter">Chapter / module</label>
           <input type="text" id="paperChapter" value="${escapeHtml(draft.chapter)}" placeholder="E.g. Fractions, Ecosystems" />
         </div>
+        <div style="flex:1;min-width:280px;">
+          <label>Upload mode</label>
+          <div class="row" style="gap:16px;margin-top:4px;">
+            <label style="display:flex;align-items:center;gap:6px;font-family:var(--sans);font-size:13px;text-transform:none;letter-spacing:normal;color:var(--ink);">
+              <input type="radio" name="uploadMode" value="single" ${state.paperUploadMode==='single'?'checked':''} /> Single file (already has answers)
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-family:var(--sans);font-size:13px;text-transform:none;letter-spacing:normal;color:var(--ink);">
+              <input type="radio" name="uploadMode" value="two" ${state.paperUploadMode==='two'?'checked':''} /> Two files (questions + separate answer key)
+            </label>
+          </div>
+        </div>
+        ${state.paperUploadMode === 'single' ? `
         <div style="flex:1;min-width:220px;">
           <label for="paperUpload">Upload questions file</label>
           <input type="file" id="paperUpload" accept=".json,.csv,.txt,.pdf,.docx,.jpg,.jpeg,.png,.webp" />
-          <div class="hint" style="margin-top:8px;">Supported: JSON, CSV, TXT (structured, parsed instantly), or a Word doc (.docx), PDF, or photo/scan of a question paper &mdash; handwritten or printed, any layout. Those are read by AI, which pulls out each question, its options, the correct answer, and an explanation automatically. Always review the imported questions before saving.</div>
+          <div class="hint" style="margin-top:8px;">Supported: JSON, CSV, TXT (structured, parsed instantly), or a Word doc (.docx), PDF, or photo/scan of a question paper &mdash; handwritten or printed, any layout, with answers included. Those are read by AI, which pulls out each question, its options, the correct answer, and an explanation automatically. Always review the imported questions before saving.</div>
           <div class="hint" id="uploadStatus" style="margin-top:6px;"></div>
         </div>
+        ` : `
+        <div style="flex:1;min-width:220px;">
+          <label for="paperUploadQuestions">Questions file (no answers needed)</label>
+          <input type="file" id="paperUploadQuestions" accept=".json,.csv,.txt,.pdf,.docx,.jpg,.jpeg,.png,.webp" />
+        </div>
+        <div style="flex:1;min-width:220px;">
+          <label for="paperUploadAnswers">Answer key file</label>
+          <input type="file" id="paperUploadAnswers" accept=".json,.csv,.txt,.pdf,.docx,.jpg,.jpeg,.png,.webp" />
+        </div>
+        <div style="flex:1 1 100%;">
+          <div class="hint">Upload both files, then click Match. AI matches each question to its answer by question number or order, and pulls in explanations if the answer key has them &mdash; any format works, handwritten included. Always review the imported questions before saving.</div>
+          <button class="btn ghost" id="btnMatchQnA" style="margin-top:8px;">Match questions with answers</button>
+          <div class="hint" id="uploadStatus" style="margin-top:6px;"></div>
+        </div>
+        `}
       </div>
       <div class="row" style="justify-content:space-between;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap;">
-        <div class="hint">Add or remove question rows as needed. Correct option must match one of the four answer choices.</div>
-        <button class="btn ghost" id="btnAddQuestion">Add question</button>
+        <div class="hint">${draft.questions.length} question${draft.questions.length===1?'':'s'} loaded from the uploaded file${state.paperUploadMode==='two'?'s':''}. Upload again to replace them.</div>
       </div>
-      <div id="paperQuestionRows">
-        ${draft.questions.map((q,i)=>`
-          <div class="paper-question-row" data-index="${i}">
-            <h4>Question ${i+1}</h4>
-            <label>Question text</label>
-            <textarea class="paper-qtext">${escapeHtml(q.q)}</textarea>
-            <div class="row" style="gap:10px;flex-wrap:wrap;">
-              ${q.opts.map((opt,j)=>`
-                <div style="flex:1;min-width:160px;">
-                  <label>Option ${j+1}</label>
-                  <input type="text" class="paper-opt" value="${escapeHtml(opt)}" />
-                </div>
-              `).join("")}
-            </div>
-            <div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end;">
-              <div style="flex:1;min-width:180px;">
-                <label>Correct option</label>
-                <select class="paper-correct">
-                  ${q.opts.map((opt,j)=>`<option value="${j}" ${q.correct===j?'selected':''}>Option ${j+1}</option>`).join("")}
-                </select>
-              </div>
-              <div style="flex:1;min-width:220px;">
-                <label>Explanation</label>
-                <textarea class="paper-expl">${escapeHtml(q.expl)}</textarea>
-              </div>
-              <button class="btn danger remove-question" data-index="${i}" style="margin-top:22px;">Remove</button>
-            </div>
+      <div id="paperQuestionPreview">
+        ${draft.questions.length ? draft.questions.map((q,i)=>`
+          <div class="qa-block">
+            <div class="qtxt">${i+1}. ${escapeHtml(q.q)}</div>
+            ${q.opts.map((opt,j)=>`<div class="ans-line ${j===q.correct?'correct':''}">${String.fromCharCode(65+j)}. ${escapeHtml(opt)}${j===q.correct?' &#10003;':''}</div>`).join("")}
+            ${q.expl ? `<div class="expl">${escapeHtml(q.expl)}</div>` : ''}
           </div>
-        `).join("")}
+        `).join("") : `<div class="empty">No questions yet — upload a file above.</div>`}
       </div>
       <div class="row" style="justify-content:flex-end;gap:12px;margin-top:10px;">
         <button class="btn ghost" id="btnCancelPaper">Cancel</button>
@@ -1255,13 +1261,8 @@ function syncTeacherDraftFromForm(){
   draft.scheduleEnd = document.getElementById("paperScheduleEnd").value;
   draft.scopeType = document.getElementById("paperScopeType").value;
   draft.chapter = document.getElementById("paperChapter").value.trim();
-  draft.questions = Array.from(form.querySelectorAll(".paper-question-row")).map(row=>{
-    const qText = row.querySelector(".paper-qtext").value.trim();
-    const opts = Array.from(row.querySelectorAll(".paper-opt")).map(el=>el.value.trim());
-    const correct = parseInt(row.querySelector(".paper-correct").value, 10);
-    const expl = row.querySelector(".paper-expl").value.trim();
-    return {q:qText, opts, correct:isNaN(correct)?0:correct, expl};
-  });
+  // draft.questions is populated directly from the uploaded file (see paperUpload handler)
+  // and is intentionally left untouched here.
 }
 
 function syncRosterDraftFromForm(){
@@ -1374,23 +1375,17 @@ document.addEventListener("click",(e)=>{
     savePaperDraft();
     return;
   }
-  if(e.target && e.target.id === "btnAddQuestion"){
-    if(state.teacherPaperDraft){
-      syncTeacherDraftFromForm();
-      state.teacherPaperDraft.questions.push({q:"", opts:["","","",""], correct:0, expl:""});
+  if(e.target && e.target.id === "btnMatchQnA" && state.teacherPaperDraft){
+    const qFile = document.getElementById("paperUploadQuestions").files[0];
+    const aFile = document.getElementById("paperUploadAnswers").files[0];
+    if(!qFile || !aFile){ alert("Please choose both a questions file and an answer key file first."); return; }
+    matchQuestionsAndAnswers(qFile, aFile).then(questions=>{
+      state.teacherPaperDraft.questions = questions.length ? questions : state.teacherPaperDraft.questions;
       render();
-    }
-    return;
-  }
-  if(e.target && e.target.classList.contains("remove-question")){
-    if(state.teacherPaperDraft){
-      syncTeacherDraftFromForm();
-      const index = parseInt(e.target.dataset.index, 10);
-      if(state.teacherPaperDraft.questions.length > 1){
-        state.teacherPaperDraft.questions.splice(index, 1);
-      }
-      render();
-    }
+      alert(`Matched ${questions.length} questions with their answers. Review and save the paper.`);
+    }).catch(err=>{
+      alert(`Matching failed: ${err.message || err}`);
+    });
     return;
   }
   if(e.target && e.target.id === "btnAddRoster"){
@@ -1443,6 +1438,11 @@ document.addEventListener("click",(e)=>{
 });
 
 document.addEventListener("change",(e)=>{
+  if(e.target && e.target.name === "uploadMode"){
+    state.paperUploadMode = e.target.value;
+    render();
+    return;
+  }
   if(e.target && e.target.id === "paperUpload" && state.teacherPaperDraft){
     const file = e.target.files && e.target.files[0];
     if(!file) return;
@@ -1542,7 +1542,9 @@ function normalizeQuestionItem(item, index){
   const correctValue = item.correct ?? item.answer ?? item.correctIndex ?? item.correctOption ?? item.correctAnswer;
   const correct = parseInt(correctValue, 10);
   const expl = String(item.expl || item.explanation || '').trim();
-  return { q: qText, opts, correct: isNaN(correct)?0:correct, expl };
+  const passage = String(item.passage || item.passageText || '').trim();
+  const figureDescription = String(item.figureDescription || item.figure || item.diagram || item.diagramDescription || '').trim();
+  return { q: qText, opts, correct: isNaN(correct)?0:correct, expl, passage, figureDescription };
 }
 
 function fileToBase64(file){
@@ -1563,26 +1565,40 @@ function fileToArrayBuffer(file){
 }
 
 /* AI-powered question extraction: works on scanned/handwritten/typed papers
-   in any layout via image or PDF input, or on plain extracted text (from DOCX/TXT). */
-async function extractQuestionsWithAI({ kind, mediaType, base64, text }){
-  const instructions = `You are extracting multiple-choice questions from a school question paper (may be handwritten, scanned, or typed, in any layout). Return ONLY a JSON array, nothing else — no markdown fences, no commentary. Each element must be an object exactly like:
-{"q": "question text", "opts": ["option A text","option B text","option C text","option D text"], "correct": 0, "expl": "one short sentence explaining why that answer is correct"}
+   in any layout via image or PDF input, or on plain extracted text (from DOCX/TXT).
+   Accepts one or more labeled sources — a single combined paper, or a separate
+   questions file plus a separate answer-key file to be matched together. */
+async function extractQuestionsWithAI(sources){
+  const instructions = `You are extracting multiple-choice questions from school question paper material (may be handwritten, scanned, or typed, in any layout). You may be given a single source that already contains both questions and answers, OR two separate sources labeled "QUESTIONS" and "ANSWER KEY" — in that case, match each question to its answer by question number, or by matching order if numbers aren't given, and pull in any explanations the answer key provides.
+
+Some papers include a shared reading passage followed by several questions about it — if so, put the exact passage text in "passage" for every question that belongs to it (repeat it identically for each), and leave "passage" as "" for questions with no passage.
+
+Some papers reference a diagram, figure, chart, image, or map ("study the diagram below", "in the figure shown"). You cannot see or reproduce the image itself as output, so instead write a clear, detailed, accessible text description of exactly what the diagram shows (labels, shapes, values, arrangement — enough that someone who can't see it could still answer the question) into "figureDescription". Leave "figureDescription" as "" if the question has no diagram.
+
+Return ONLY a JSON array, nothing else — no markdown fences, no commentary. Each element must be an object exactly like:
+{"q": "question text", "opts": ["option A text","option B text","option C text","option D text"], "correct": 0, "expl": "one short sentence explaining why that answer is correct", "passage": "", "figureDescription": ""}
 Rules:
 - "correct" is the 0-indexed position of the right option within "opts".
-- If the correct answer is not marked anywhere in the source, use your own subject knowledge to determine the right answer.
+- If the correct answer is not marked or provided anywhere in the source(s), use your own subject knowledge to determine the right answer.
 - If an explanation is not given in the source, write a brief, accurate one yourself.
 - Always output exactly 4 options per question, even if the source used fewer (in that case add clearly implausible distractors).
 - Skip anything that isn't a genuine question.
 - If you cannot find any valid questions, return [].`;
 
-  const contentBlocks = [];
-  if(kind === 'image'){
-    contentBlocks.push({ type:'image', source:{ type:'base64', media_type: mediaType, data: base64 } });
-  } else if(kind === 'document'){
-    contentBlocks.push({ type:'document', source:{ type:'base64', media_type: mediaType, data: base64 } });
-  }
-  const textPart = kind === 'text' ? `${instructions}\n\nSource text:\n${text}` : instructions;
-  contentBlocks.push({ type:'text', text: textPart });
+  let inlineText = instructions;
+  const mediaBlocks = [];
+  sources.forEach(s=>{
+    if(s.kind === 'text'){
+      inlineText += `\n\n=== ${s.label} ===\n${s.text}`;
+    } else if(s.kind === 'image'){
+      mediaBlocks.push({ type:'text', text:`\n=== ${s.label} (image attached) ===` });
+      mediaBlocks.push({ type:'image', source:{ type:'base64', media_type: s.mediaType, data: s.base64 } });
+    } else if(s.kind === 'document'){
+      mediaBlocks.push({ type:'text', text:`\n=== ${s.label} (document attached) ===` });
+      mediaBlocks.push({ type:'document', source:{ type:'base64', media_type: s.mediaType, data: s.base64 } });
+    }
+  });
+  const contentBlocks = [{ type:'text', text: inlineText }, ...mediaBlocks];
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -1603,12 +1619,60 @@ Rules:
   try{
     items = JSON.parse(cleaned);
   }catch(err){
-    throw new Error('AI could not return readable question data. Try a clearer photo/scan, or enter questions manually.');
+    throw new Error('AI could not return readable question data. Try a clearer photo/scan, or a cleaner file.');
   }
   if(!Array.isArray(items) || items.length === 0){
     throw new Error('No questions could be identified in this file.');
   }
   return items.map(normalizeQuestionItem);
+}
+
+/* Prepares one uploaded file into a labeled source object for extractQuestionsWithAI,
+   without calling the AI itself — used by both single-file and two-file matching flows. */
+async function prepareFileSource(file, label){
+  const fileName = file.name.toLowerCase();
+  if(fileName.endsWith('.pdf')){
+    const base64 = await fileToBase64(file);
+    return { label, kind:'document', mediaType:'application/pdf', base64 };
+  }
+  if(fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.png') || fileName.endsWith('.webp')){
+    const mediaType = fileName.endsWith('.png') ? 'image/png' : fileName.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    const base64 = await fileToBase64(file);
+    return { label, kind:'image', mediaType, base64 };
+  }
+  if(fileName.endsWith('.docx')){
+    if(!window.mammoth) throw new Error('DOCX reader failed to load. Please retry.');
+    const buf = await fileToArrayBuffer(file);
+    const result = await mammoth.extractRawText({ arrayBuffer: buf });
+    const text = result.value || '';
+    if(!text.trim()) throw new Error(`Could not find any text in ${file.name}.`);
+    return { label, kind:'text', text };
+  }
+  // JSON/CSV/TXT and anything else: read as plain text.
+  const text = await new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>resolve(reader.result);
+    reader.onerror = ()=>reject(reader.error || new Error('File read failed.'));
+    reader.readAsText(file);
+  });
+  return { label, kind:'text', text };
+}
+
+/* Two-file flow: a questions file and a separate answer-key file, matched by AI. */
+async function matchQuestionsAndAnswers(questionsFile, answersFile){
+  const statusEl = document.getElementById('uploadStatus');
+  const setStatus = (msg)=>{ if(statusEl) statusEl.textContent = msg; };
+  try{
+    setStatus('Reading both files…');
+    const [qSource, aSource] = await Promise.all([
+      prepareFileSource(questionsFile, 'QUESTIONS (no answers marked)'),
+      prepareFileSource(answersFile, 'ANSWER KEY')
+    ]);
+    setStatus('Matching questions with answers using AI… this can take a moment.');
+    return await extractQuestionsWithAI([qSource, aSource]);
+  } finally {
+    setStatus('');
+  }
 }
 
 function parseCsvQuestions(text){
@@ -1629,7 +1693,9 @@ function parseCsvQuestions(text){
     q: String(row.question || row.q || row.text || '').trim(),
     opts: [String(row.opt1 || row.option1 || row.a || '').trim(), String(row.opt2 || row.option2 || row.b || '').trim(), String(row.opt3 || row.option3 || row.c || '').trim(), String(row.opt4 || row.option4 || row.d || '').trim()],
     correct: isNaN(parseInt(row.correct, 10)) ? 0 : parseInt(row.correct, 10),
-    expl: String(row.expl || row.explanation || '').trim()
+    expl: String(row.expl || row.explanation || '').trim(),
+    passage: String(row.passage || '').trim(),
+    figureDescription: String(row.figuredescription || row.figure || row.diagram || '').trim()
   }));
 }
 
