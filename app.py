@@ -36,7 +36,11 @@ load_env_file()
 #            accounts (as of July 2026). Flip AI_PROVIDER=gemini once that's
 #            fixed on Google's end, or if your key happens to work.
 # "openrouter" — genuinely free, no credit card, working today (July 2026).
-#                Uses a free vision-capable model. Requires OPENROUTER_API_KEY.
+#                Uses OpenRouter's free auto-router by default, which picks
+#                whichever free model currently supports the request (e.g.
+#                vision for images/PDFs) — this avoids hardcoding a specific
+#                free model ID, since those rotate to paid without notice.
+#                Requires OPENROUTER_API_KEY.
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "openrouter").strip().lower()
 
 
@@ -87,7 +91,7 @@ def _extract_with_openrouter(content_blocks):
                 "image_url": {"url": f"data:{media_type};base64,{data_b64}"}
             })
 
-    model = os.environ.get("OPENROUTER_MODEL", "qwen/qwen2.5-vl-72b-instruct:free")
+    model = os.environ.get("OPENROUTER_MODEL", "openrouter/free")
     payload = json.dumps({
         "model": model,
         "messages": [{"role": "user", "content": parts}]
