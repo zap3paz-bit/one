@@ -116,6 +116,12 @@
   @media (max-width:760px){.exam-layout{grid-template-columns:1fr;}}
   .q-progress{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:6px;}
   .q-text{font-family:var(--serif);font-size:19px;line-height:1.4;margin:10px 0 18px;}
+  .passage-block{background:var(--paper);border:1px solid var(--line);border-left:3px solid var(--ink);padding:14px 16px;margin:10px 0 16px;}
+  .passage-label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px;}
+  .passage-text{font-size:14px;line-height:1.6;white-space:pre-wrap;}
+  .figure-block{background:#eef1f6;border:1px dashed var(--muted);padding:12px 14px;margin:0 0 18px;}
+  .figure-label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px;}
+  .figure-caption{font-size:13.5px;line-height:1.5;font-style:italic;color:var(--ink);}
   .opt{
     display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line);
     margin-bottom:9px;cursor:pointer;background:var(--paper-2);
@@ -529,11 +535,25 @@ function startExam(){
 
 function renderExam(){
   const q = state.questions[state.currentQ];
+  const prevQ = state.currentQ > 0 ? state.questions[state.currentQ-1] : null;
+  const showPassage = q.passage && q.passage !== (prevQ ? prevQ.passage : null);
   app.innerHTML = `
     <div class="exam-layout">
       <div class="card">
         <div class="q-progress">QUESTION ${state.currentQ+1} OF ${state.questions.length} &middot; CLASS ${state.studentClass}</div>
+        ${showPassage ? `
+          <section class="passage-block" aria-label="Reading passage">
+            <div class="passage-label">Reading passage</div>
+            <div class="passage-text">${escapeHtml(q.passage)}</div>
+          </section>
+        ` : ''}
         <div class="q-text">${escapeHtml(q.q)}</div>
+        ${q.figureDescription ? `
+          <figure class="figure-block" role="img" aria-label="Diagram description: ${escapeHtml(q.figureDescription)}">
+            <div class="figure-label">&#9635; Diagram / figure described below</div>
+            <figcaption class="figure-caption">${escapeHtml(q.figureDescription)}</figcaption>
+          </figure>
+        ` : ''}
         <div id="opts">
           ${q.opts.map((o,i)=>`
             <div class="opt ${state.answers[state.currentQ]===i?'selected':''}" data-idx="${i}">
@@ -1115,7 +1135,9 @@ function renderTeacherPaperForm(){
       <div id="paperQuestionPreview">
         ${draft.questions.length ? draft.questions.map((q,i)=>`
           <div class="qa-block">
+            ${q.passage ? `<div class="passage-block"><div class="passage-label">Reading passage</div><div class="passage-text">${escapeHtml(q.passage)}</div></div>` : ''}
             <div class="qtxt">${i+1}. ${escapeHtml(q.q)}</div>
+            ${q.figureDescription ? `<div class="figure-block"><div class="figure-label">&#9635; Diagram / figure described</div><div class="figure-caption">${escapeHtml(q.figureDescription)}</div></div>` : ''}
             ${q.opts.map((opt,j)=>`<div class="ans-line ${j===q.correct?'correct':''}">${String.fromCharCode(65+j)}. ${escapeHtml(opt)}${j===q.correct?' &#10003;':''}</div>`).join("")}
             ${q.expl ? `<div class="expl">${escapeHtml(q.expl)}</div>` : ''}
           </div>
@@ -1497,39 +1519,9 @@ function parseQuestionsFromFile(file){
 
   // Everything else (TXT, PDF, DOCX, images) goes through the AI interpreter.
   setStatus('Reading file…');
-  if(fileName.endsWith('.pdf')){
-    return fileToBase64(file).then(b64=>{
-      setStatus('Interpreting PDF with AI… this can take a moment.');
-      return extractQuestionsWithAI({ kind:'document', mediaType:'application/pdf', base64:b64 });
-    }).finally(()=>setStatus(''));
-  }
-  if(fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.png') || fileName.endsWith('.webp')){
-    const mediaType = fileName.endsWith('.png') ? 'image/png' : fileName.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
-    return fileToBase64(file).then(b64=>{
-      setStatus('Interpreting image with AI… this can take a moment.');
-      return extractQuestionsWithAI({ kind:'image', mediaType, base64:b64 });
-    }).finally(()=>setStatus(''));
-  }
-  if(fileName.endsWith('.docx')){
-    return fileToArrayBuffer(file).then(async buf=>{
-      if(!window.mammoth) throw new Error('DOCX reader failed to load. Please retry.');
-      setStatus('Reading Word document…');
-      const result = await mammoth.extractRawText({ arrayBuffer: buf });
-      const text = result.value || '';
-      if(!text.trim()) throw new Error('Could not find any text in this DOCX file.');
-      setStatus('Interpreting document with AI… this can take a moment.');
-      return extractQuestionsWithAI({ kind:'text', text });
-    }).finally(()=>setStatus(''));
-  }
-  // Plain TXT, or anything else: try as text through the AI interpreter.
-  return new Promise((resolve,reject)=>{
-    const reader = new FileReader();
-    reader.onload = ()=>resolve(reader.result);
-    reader.onerror = ()=>reject(reader.error || new Error('File read failed.'));
-    reader.readAsText(file);
-  }).then(text=>{
+  return prepareFileSource(file, 'QUESTION PAPER').then(source=>{
     setStatus('Interpreting with AI… this can take a moment.');
-    return extractQuestionsWithAI({ kind:'text', text });
+    return extractQuestionsWithAI([source]);
   }).finally(()=>setStatus(''));
 }
 
