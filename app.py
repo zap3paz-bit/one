@@ -77,18 +77,28 @@ def _extract_with_openrouter(content_blocks):
 
     # Convert the frontend's Anthropic-style content blocks into OpenAI-style
     # content parts, which OpenRouter's chat completions endpoint expects.
+    # Note: most free vision models on OpenRouter only accept real images
+    # (JPG/PNG/WEBP) as image_url — raw PDF bytes are usually rejected by
+    # the underlying provider, which is what "Provider returned error"
+    # from OpenRouter almost always means in practice.
     parts = []
     for block in content_blocks:
         btype = block.get("type")
         if btype == "text":
             parts.append({"type": "text", "text": block.get("text", "")})
-        elif btype in ("image", "document"):
+        elif btype == "document":
             source = block.get("source", {})
-            media_type = source.get("media_type", "application/octet-stream")
-            data_b64 = source.get("data", "")
+            if source.get("media_type") == "application/pdf":
+                return jsonify({"error": "PDF uploads aren't reliably supported by OpenRouter's free vision models. Please upload a photo/screenshot of the paper (JPG/PNG) instead, or set AI_PROVIDER=anthropic on your host, which does support PDFs directly."}), 422
             parts.append({
                 "type": "image_url",
-                "image_url": {"url": f"data:{media_type};base64,{data_b64}"}
+                "image_url": {"url": f"data:{source.get('media_type','application/octet-stream')};base64,{source.get('data','')}"}
+            })
+        elif btype == "image":
+            source = block.get("source", {})
+            parts.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{source.get('media_type','application/octet-stream')};base64,{source.get('data','')}"}
             })
 
     model = os.environ.get("OPENROUTER_MODEL", "openrouter/free")
@@ -100,18 +110,30 @@ def _extract_with_openrouter(content_blocks):
     req = urllib.request.Request("https://openrouter.ai/api/v1/chat/completions", data=payload)
     req.add_header("Authorization", f"Bearer {api_key}")
     req.add_header("Content-Type", "application/json")
+    req.add_header("HTTP-Referer", "https://openrouter.ai")
+    req.add_header("X-Title", "GC Proctored CBT")
 
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.load(resp)
     except urllib.error.HTTPError as err:
         err_body = err.read().decode("utf-8")
+        error_message = err_body
         try:
             parsed = json.loads(err_body)
-            error_message = parsed.get("error", {}).get("message") or parsed
+            err_obj = parsed.get("error", {})
+            if isinstance(err_obj, dict):
+                base_msg = err_obj.get("message", "")
+                metadata = err_obj.get("metadata", {})
+                raw = metadata.get("raw") if isinstance(metadata, dict) else None
+                provider_name = metadata.get("provider_name") if isinstance(metadata, dict) else None
+                pieces = [p for p in [base_msg, f"(provider: {provider_name})" if provider_name else None, raw] if p]
+                error_message = " — ".join(pieces) if pieces else err_body
+            else:
+                error_message = str(err_obj) or err_body
         except Exception:
-            error_message = err_body
-        return jsonify({"error": str(error_message)}), err.code
+            pass
+        return jsonify({"error": error_message}), err.code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
