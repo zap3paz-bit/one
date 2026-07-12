@@ -38,37 +38,51 @@ def healthz():
 
 @app.route("/api/extract-questions", methods=["POST", "OPTIONS"])
 def extract_questions():
-    """Server-side proxy to the Anthropic API for interpreting uploaded
-    question papers (image/PDF/text) into structured question JSON.
+    """Server-side proxy to the Gemini API (free tier) for interpreting
+    uploaded question papers (image/PDF/text) into structured question JSON.
     Runs on the backend, using a real API key, so the browser never needs
-    direct access to api.anthropic.com."""
+    direct access to the AI provider itself."""
     if request.method == "OPTIONS":
         return ("", 204)
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        return jsonify({"error": "ANTHROPIC_API_KEY is not configured on the server. Add it as an environment variable on your host."}), 503
+        return jsonify({"error": "GEMINI_API_KEY is not configured on the server. Add it as an environment variable on your host."}), 503
 
     data = request.get_json(silent=True) or {}
     content_blocks = data.get("content")
     if not content_blocks:
         return jsonify({"error": "No content provided."}), 400
 
+    # Convert the frontend's Anthropic-style content blocks into Gemini's
+    # "parts" format, so gc.html doesn't need to know which provider is used.
+    parts = []
+    for block in content_blocks:
+        btype = block.get("type")
+        if btype == "text":
+            parts.append({"text": block.get("text", "")})
+        elif btype in ("image", "document"):
+            source = block.get("source", {})
+            parts.append({
+                "inline_data": {
+                    "mime_type": source.get("media_type", "application/octet-stream"),
+                    "data": source.get("data", "")
+                }
+            })
+
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     payload = json.dumps({
-        "model": "claude-sonnet-4-6",
-        "max_tokens": 4000,
-        "messages": [{"role": "user", "content": content_blocks}]
+        "contents": [{"role": "user", "parts": parts}]
     }).encode("utf-8")
 
-    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=payload)
-    req.add_header("x-api-key", api_key)
-    req.add_header("anthropic-version", "2023-06-01")
+    req = urllib.request.Request(url, data=payload)
+    req.add_header("x-goog-api-key", api_key)
     req.add_header("Content-Type", "application/json")
 
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.load(resp)
-            return jsonify(result)
     except urllib.error.HTTPError as err:
         err_body = err.read().decode("utf-8")
         try:
@@ -79,6 +93,15 @@ def extract_questions():
         return jsonify({"error": str(error_message)}), err.code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+    # Re-shape Gemini's response into the {content:[{type:'text', text:...}]}
+    # form gc.html already expects, so the frontend needed no changes.
+    try:
+        candidate_parts = result["candidates"][0]["content"]["parts"]
+        text = "".join(p.get("text", "") for p in candidate_parts)
+    except (KeyError, IndexError):
+        text = ""
+    return jsonify({"content": [{"type": "text", "text": text}]})
 
 
 @app.route("/gc.html")
