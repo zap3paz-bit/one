@@ -71,13 +71,12 @@ def extract_questions():
             })
 
     model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     payload = json.dumps({
         "contents": [{"role": "user", "parts": parts}]
     }).encode("utf-8")
 
     req = urllib.request.Request(url, data=payload)
-    req.add_header("x-goog-api-key", api_key)
     req.add_header("Content-Type", "application/json")
 
     try:
