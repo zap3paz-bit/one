@@ -37,7 +37,7 @@ load_env_file()
 #            fixed on Google's end, or if your key happens to work.
 # "openrouter" — genuinely free, no credit card, working today (July 2026).
 #                Uses a free vision-capable model. Requires OPENROUTER_API_KEY.
-AI_PROVIDER = os.environ.get("AI_PROVIDER", "anthropic").strip().lower()
+AI_PROVIDER = os.environ.get("AI_PROVIDER", "openrouter").strip().lower()
 
 
 @app.route("/healthz")
